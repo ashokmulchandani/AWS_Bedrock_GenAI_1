@@ -1,5 +1,4 @@
 import boto3
-import botocore.config
 import json
 from datetime import datetime
 
@@ -9,39 +8,41 @@ def blog_generate_using_bedrock(blogtopic: str) -> str:
     This function takes a topic and asks AI to write a blog about it
     """
     
-    # Step 1: Create instructions for the AI (using Claude format)
-    prompt = f"\n\nHuman: Write a 200 words blog on the topic {blogtopic}\n\nAssistant:"
+    # Step 1: Create instructions for the AI (using Llama format)
+    prompt = f"Write a comprehensive blog post about {blogtopic}. Include an introduction, main points, and conclusion."
 
     # Step 2: Set up AI parameters (how the AI should behave)
     body = {
         "prompt": prompt,
-        "max_tokens_to_sample": 512,
-        "temperature": 0.5,
+        "max_gen_len": 1000,
+        "temperature": 0.7,
         "top_p": 0.9
     }
 
     try:
-        # Step 3: Connect to AWS Bedrock (AI service) with timeout and retry settings
+        # Step 3: Connect to AWS Bedrock (AI service) with timeout settings
         bedrock = boto3.client(
             "bedrock-runtime",
-            region_name="ap-southeast-2",
-            config=botocore.config.Config(
-                read_timeout=300,
-                retries={'max_attempts': 3}
+            region_name="us-east-1",
+            config=boto3.session.Config(
+                read_timeout=60,
+                connect_timeout=10
             )
         )
         
         # Step 4: Send request to AI model
         response = bedrock.invoke_model(
             body=json.dumps(body),
-            modelId="anthropic.claude-v2"
+            modelId="meta.llama3-8b-instruct-v1:0",
+            accept='application/json',
+            contentType='application/json'
         )
 
         # Step 5: Get the AI's response
         response_body = json.loads(response.get('body').read())
 
         # Step 6: Extract the blog text from response
-        generation = response_body['completion']
+        generation = response_body['generation']
         print("Blog generated successfully!")
         return generation
 
@@ -81,18 +82,13 @@ def lambda_handler(event, context):
     try:
         print(f"Received event: {json.dumps(event)}")
         
-        # Step 1: Get the blog topic from the request
-        if 'body' not in event:
-            return {
-                'statusCode': 400,
-                'body': json.dumps('Missing request body')
-            }
-            
-        request_body = event['body']
-        if isinstance(request_body, str):
-            request_data = json.loads(request_body)
+        # Step 1: Get the blog topic from the request (FIXED REQUEST PARSING)
+        if 'body' in event:
+            # API Gateway format - parse the body
+            request_data = json.loads(event['body'])
         else:
-            request_data = request_body
+            # Direct test format - use event directly
+            request_data = event
             
         if 'blog_topic' not in request_data:
             return {
@@ -101,10 +97,13 @@ def lambda_handler(event, context):
             }
             
         blogtopic = request_data['blog_topic']
-        print(f"Blog topic: {blogtopic}")
+        print(f"Blog topic received: {blogtopic}")
 
         # Step 2: Generate the blog using AI
         generated_blog = blog_generate_using_bedrock(blogtopic)
+        print(f"Blog generated successfully for topic: {blogtopic}")
+        print(f"Blog content length: {len(generated_blog)} characters")
+        print(f"Blog content: {generated_blog}")
 
         # Step 3: Check if blog was generated successfully
         if generated_blog and generated_blog != "Sorry, couldn't generate blog":
@@ -124,7 +123,8 @@ def lambda_handler(event, context):
                 'body': json.dumps({
                     'message': 'Blog generated and saved successfully!',
                     'filename': filename,
-                    'blog_content': generated_blog[:200] + '...' if len(generated_blog) > 200 else generated_blog
+                    'blog_topic': blogtopic,
+                    'blog_content': generated_blog
                 })
             }
         else:
@@ -161,11 +161,3 @@ def lambda_handler(event, context):
                 'details': str(error)
             })
         }
-    
-
-
-
-
-
-
-

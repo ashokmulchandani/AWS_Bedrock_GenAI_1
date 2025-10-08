@@ -52,7 +52,7 @@ def lambda_handler(event, context):
     if generate_blog:
         current_time=datetime.now().strftime('%H%M%S')
         s3_key=f"blog-output/{current_time}.txt"
-        s3_bucket='aws_bedrock_course1'
+        s3_bucket='awsbedrockcoursebucket1'
         save_blog_details_s3(s3_key,s3_bucket,generate_blog)
 
 

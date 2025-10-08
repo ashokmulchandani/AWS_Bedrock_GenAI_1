@@ -1,66 +1,50 @@
 import boto3
-import botocore.config
 import json
 from datetime import datetime
 
-# Function 1: Generate blog using AI
 def blog_generate_using_bedrock(blogtopic: str) -> str:
-    """
-    This function takes a topic and asks AI to write a blog about it
-    """
+    """Generate blog using AI"""
+    prompt = f"Write a comprehensive blog post about {blogtopic}. Include an introduction, main points, and conclusion."
     
-    # Step 1: Create instructions for the AI (using Claude format)
-    prompt = f"\n\nHuman: Write a 200 words blog on the topic {blogtopic}\n\nAssistant:"
-
-    # Step 2: Set up AI parameters (how the AI should behave)
     body = {
         "prompt": prompt,
-        "max_tokens_to_sample": 512,
-        "temperature": 0.5,
+        "max_gen_len": 1000,
+        "temperature": 0.7,
         "top_p": 0.9
     }
 
     try:
-        # Step 3: Connect to AWS Bedrock (AI service) with timeout and retry settings
         bedrock = boto3.client(
             "bedrock-runtime",
-            region_name="ap-southeast-2",
-            config=botocore.config.Config(
-                read_timeout=300,
-                retries={'max_attempts': 3}
+            region_name="us-east-1",
+            config=boto3.session.Config(
+                read_timeout=60,
+                connect_timeout=10
             )
         )
         
-        # Step 4: Send request to AI model
         response = bedrock.invoke_model(
             body=json.dumps(body),
-            modelId="anthropic.claude-v2"
+            modelId="meta.llama3-8b-instruct-v1:0",
+            accept='application/json',
+            contentType='application/json'
         )
 
-        # Step 5: Get the AI's response
         response_body = json.loads(response.get('body').read())
-
-        # Step 6: Extract the blog text from response
-        generation = response_body['completion']
+        generation = response_body['generation']
         print("Blog generated successfully!")
         return generation
 
     except Exception as error:
         print(f"Error occurred: {error}")
-        return ("Sorry, couldn't generate blog")
+        return "Sorry, couldn't generate blog"
 
-# Function 2: Save blog to cloud storage
 def save_blog_details_s3(s3_key: str, s3_bucket: str, generate_blog: str) -> None:
-    """
-    This function saves the blog to AWS S3 (cloud storage)
-    Input: s3_key, s3_bucket, generate_blog
-    """
+    """Save blog to S3"""
     try:
-        # Connect to AWS S3 (cloud storage)
         print("Connecting to cloud storage...")
         s3_client = boto3.client('s3')
         
-        # Upload the blog to cloud
         s3_client.put_object(
             Bucket=s3_bucket,
             Key=s3_key,
@@ -72,27 +56,16 @@ def save_blog_details_s3(s3_key: str, s3_bucket: str, generate_blog: str) -> Non
     except Exception as error:
         print(f"Error saving to cloud: {error}")
 
-# Function 3: Main function (orchestrates everything)
 def lambda_handler(event, context):
-    """
-    This is the main function that runs when Lambda is triggered
-    It coordinates all the steps: get topic -> generate blog -> save to cloud
-    """
+    """Main Lambda function"""
     try:
         print(f"Received event: {json.dumps(event)}")
         
-        # Step 1: Get the blog topic from the request
-        if 'body' not in event:
-            return {
-                'statusCode': 400,
-                'body': json.dumps('Missing request body')
-            }
-            
-        request_body = event['body']
-        if isinstance(request_body, str):
-            request_data = json.loads(request_body)
+        # Parse request - handle both API Gateway and direct test
+        if 'body' in event:
+            request_data = json.loads(event['body'])
         else:
-            request_data = request_body
+            request_data = event
             
         if 'blog_topic' not in request_data:
             return {
@@ -101,14 +74,17 @@ def lambda_handler(event, context):
             }
             
         blogtopic = request_data['blog_topic']
-        print(f"Blog topic: {blogtopic}")
+        print(f"Blog topic received: {blogtopic}")
 
-        # Step 2: Generate the blog using AI
+        # Generate blog
         generated_blog = blog_generate_using_bedrock(blogtopic)
+        print(f"Blog generated successfully for topic: {blogtopic}")
+        print(f"Blog content length: {len(generated_blog)} characters")
+        print(f"Blog content: {generated_blog}")
 
-        # Step 3: Check if blog was generated successfully
+        # Check if successful
         if generated_blog and generated_blog != "Sorry, couldn't generate blog":
-            # Create a unique filename with timestamp
+            # Save to S3
             current_time = datetime.now().strftime('%H%M%S')
             filename = f"blog-output/{current_time}.txt"
             bucket_name = 'awsbedrockcoursebucket1'
@@ -124,7 +100,8 @@ def lambda_handler(event, context):
                 'body': json.dumps({
                     'message': 'Blog generated and saved successfully!',
                     'filename': filename,
-                    'blog_content': generated_blog[:200] + '...' if len(generated_blog) > 200 else generated_blog
+                    'blog_topic': blogtopic,
+                    'blog_content': generated_blog
                 })
             }
         else:
@@ -160,12 +137,4 @@ def lambda_handler(event, context):
                 'error': 'Internal server error',
                 'details': str(error)
             })
-        }
-    
-
-
-
-
-
-
-
+        } 

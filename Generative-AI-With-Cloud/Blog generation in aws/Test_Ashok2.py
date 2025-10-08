@@ -13,14 +13,12 @@ def generate_blog_with_ai(topic):
     """
     
     # Step 1: Create instructions for the AI (using Llama format)
-    ai_instructions = f"""<s>[INST]Human: Write a 200 words blog on the topic {topic}
-    Assistant:[/INST]
-    """
+    ai_instructions = f"<s>[INST]Human: Write a 200 words blog on the topic {topic}[/INST]"
     
     # Step 2: Set up AI parameters (how the AI should behave)
     ai_settings = {
         "prompt": ai_instructions,      # What to ask the AI
-        "max_gen_len": 512,            # Maximum words AI can write
+        "max_gen_len": 512,            # Maximum tokens AI can generate
         "temperature": 0.5,            # Creativity level (0-1, higher = more creative)
         "top_p": 0.9                   # Word variety (0-1, higher = more variety)
     }
@@ -88,8 +86,30 @@ def lambda_handler(event, context):
     """
     
     try:
-        # Step 1: Get the blog topic from the request
-        request_data = json.loads(event['body'])
+        print(f"Received event: {json.dumps(event)}")
+        
+        # Step 1: Validate request
+        if 'body' not in event:
+            return {
+                'statusCode': 400,
+                'headers': {'Content-Type': 'application/json'},
+                'body': json.dumps({'error': 'Missing request body'})
+            }
+        
+        # Parse request body
+        request_body = event['body']
+        if isinstance(request_body, str):
+            request_data = json.loads(request_body)
+        else:
+            request_data = request_body
+            
+        if 'blog_topic' not in request_data:
+            return {
+                'statusCode': 400,
+                'headers': {'Content-Type': 'application/json'},
+                'body': json.dumps({'error': 'Missing blog_topic in request'})
+            }
+            
         blog_topic = request_data['blog_topic']
         print(f"Received request to write blog about: {blog_topic}")
         
@@ -102,26 +122,51 @@ def lambda_handler(event, context):
             # Create a unique filename with timestamp
             current_time = datetime.now().strftime('%H%M%S')
             filename = f"blog-output/{current_time}.txt"
-            bucket_name = 'aws_bedrock_course1'
+            bucket_name = 'awsbedrockcoursebucket1'
             
             # Save to cloud storage
             save_blog_to_cloud(filename, bucket_name, generated_blog)
             
             return {
                 'statusCode': 200,
-                'body': json.dumps('Blog generated and saved successfully!')
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({
+                    'message': 'Blog generated and saved successfully!',
+                    'filename': filename,
+                    'preview': generated_blog[:200] + '...' if len(generated_blog) > 200 else generated_blog
+                })
             }
         else:
             return {
                 'statusCode': 500,
-                'body': json.dumps('Failed to generate blog')
+                'headers': {'Content-Type': 'application/json'},
+                'body': json.dumps({
+                    'error': 'Failed to generate blog',
+                    'details': generated_blog
+                })
             }
             
+    except json.JSONDecodeError as e:
+        print(f"JSON decode error: {e}")
+        return {
+            'statusCode': 400,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({'error': f'Invalid JSON: {str(e)}'})
+        }
     except Exception as error:
         print(f"Main function error: {error}")
+        import traceback
+        print(f"Full traceback: {traceback.format_exc()}")
         return {
             'statusCode': 500,
-            'body': json.dumps('Something went wrong')
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({
+                'error': 'Internal server error',
+                'details': str(error)
+            })
         }
 
 # Test the function (uncomment to test locally)
